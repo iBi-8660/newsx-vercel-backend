@@ -9,7 +9,7 @@ let readingSessions = {}; // { userId: { articleId, startTime } }
 
 module.exports = async (req, res) => {
   const { method, url } = req;
-  let body = req.body;
+  let body = {};
 
   if (req.headers["content-type"] === "application/json" && req.method !== "GET") {
     body = await new Promise(resolve => {
