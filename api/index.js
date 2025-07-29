@@ -26,6 +26,7 @@ module.exports = async (req, res) => {
       user = { id: users.length + 1, email, balance: 60 };
       users.push(user);
     }
+    res.setHeader("Content-Type", "application/json");
     return res.end(JSON.stringify({ userId: user.id, token: "demo-token" }));
   }
 
@@ -38,31 +39,34 @@ module.exports = async (req, res) => {
         title: item.title,
         body: item.contentSnippet || item.content || "(Indhold ikke tilgængeligt)",
       }));
-      return res.end(JSON.stringify(articles));
+      res.setHeader("Content-Type", "application/json");
+    return res.end(JSON.stringify(articles));
     } catch (e) {
-      return res.writeHead(500).end(JSON.stringify({ error: "Kunne ikke hente nyheder" }));
+      res.writeHead(500, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "Kunne ikke hente nyheder" }));
     }
   }
 
   if (url === "/api/start-read" && method === "POST") {
     const { userId, articleId } = body;
     readingSessions[userId] = { articleId, startTime: Date.now() };
+    res.setHeader("Content-Type", "application/json");
     return res.end(JSON.stringify({ ok: true }));
   }
 
   if (url === "/api/stop-read" && method === "POST") {
     const { userId } = body;
     const session = readingSessions[userId];
-    if (!session) return res.writeHead(400).end(JSON.stringify({ error: "Ingen aktiv session" }));
+    if (!session) res.writeHead(400, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "Ingen aktiv session" }));
 
     const minutes = Math.ceil((Date.now() - session.startTime) / 60000);
     const user = users.find(u => u.id === userId);
     if (!user || user.balance < minutes)
-      return res.writeHead(402).end(JSON.stringify({ error: "Ikke nok minutter tilbage" }));
+      res.writeHead(402, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "Ikke nok minutter tilbage" }));
 
     const price = (minutes * PRICE_PER_MINUTE_DKK).toFixed(2);
     user.balance -= minutes;
     delete readingSessions[userId];
+    res.setHeader("Content-Type", "application/json");
     return res.end(JSON.stringify({ minutesUsed: minutes, newBalance: user.balance, price: parseFloat(price) }));
   }
 
@@ -70,15 +74,17 @@ module.exports = async (req, res) => {
     const urlObj = new URL("http://localhost" + url);
     const userId = parseInt(urlObj.searchParams.get("userId"));
     const user = users.find(u => u.id === userId);
-    if (!user) return res.writeHead(404).end(JSON.stringify({ error: "Bruger ikke fundet" }));
+    if (!user) res.writeHead(404, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "Bruger ikke fundet" }));
+    res.setHeader("Content-Type", "application/json");
     return res.end(JSON.stringify({ balance: user.balance, pricePerMinute: PRICE_PER_MINUTE_DKK }));
   }
 
   if (url === "/api/buy" && method === "POST") {
     const { userId, amount } = body;
     const user = users.find(u => u.id === userId);
-    if (!user) return res.writeHead(404).end(JSON.stringify({ error: "Bruger ikke fundet" }));
+    if (!user) res.writeHead(404, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "Bruger ikke fundet" }));
     user.balance += amount;
+    res.setHeader("Content-Type", "application/json");
     return res.end(JSON.stringify({ success: true, newBalance: user.balance, added: amount }));
   }
 
