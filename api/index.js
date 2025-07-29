@@ -1,84 +1,86 @@
+// Datei: api/index.js (Vercel-kompatibel als Serverless Function)
 
-const express = require("express");
-const bodyParser = require("body-parser");
-const cors = require("cors");
 const Parser = require("rss-parser");
-const app = express();
 const parser = new Parser();
 
 const PRICE_PER_MINUTE_DKK = 0.5;
+let users = [{ id: 1, email: "test@example.com", balance: 60 }];
+let readingSessions = {}; // { userId: { articleId, startTime } }
 
-let users = [{ id: 1, email: "test@example.com", password: "1234", balance: 60 }];
-let readingSessions = {};
+module.exports = async (req, res) => {
+  const { method, url } = req;
+  let body = req.body;
 
-app.use(cors());
-app.use(bodyParser.json());
-
-app.post("/api/login", (req, res) => {
-  const { email, password } = req.body;
-  let user = users.find(u => u.email === email && u.password === password);
-  if (user) {
-    res.json({ token: "demo-token", userId: user.id });
-  } else {
-    const newId = users.length + 1;
-    user = { id: newId, email, password, balance: 60 };
-    users.push(user);
-    res.json({ token: "demo-token", userId: user.id, message: "Ny bruger oprettet med 60 gratis minutter." });
+  if (req.headers["content-type"] === "application/json" && req.method !== "GET") {
+    body = await new Promise(resolve => {
+      let data = "";
+      req.on("data", chunk => (data += chunk));
+      req.on("end", () => resolve(JSON.parse(data)));
+    });
   }
-});
 
-app.get("/api/articles", async (req, res) => {
-  try {
-    const berlingske = await parser.parseURL("https://www.berlingske.dk/rss");
-    const politiken = await parser.parseURL("https://politiken.dk/rss");
-
-    const articles = [...berlingske.items, ...politiken.items].slice(0, 10).map((item, index) => ({
-      id: index + 1,
-      title: item.title,
-      body: item.contentSnippet || item.content || "(Indhold ikke tilgængeligt)",
-    }));
-
-    res.json(articles);
-  } catch (error) {
-    res.status(500).json({ error: "Kunne ikke hente nyheder" });
+  if (url === "/api/login" && method === "POST") {
+    const { email } = body;
+    let user = users.find(u => u.email === email);
+    if (!user) {
+      user = { id: users.length + 1, email, balance: 60 };
+      users.push(user);
+    }
+    return res.end(JSON.stringify({ userId: user.id, token: "demo-token" }));
   }
-});
 
-app.post("/api/start-read", (req, res) => {
-  const { userId, articleId } = req.body;
-  readingSessions[userId] = { articleId, startTime: Date.now() };
-  res.json({ ok: true });
-});
+  if (url === "/api/articles" && method === "GET") {
+    try {
+      const berlingske = await parser.parseURL("https://www.berlingske.dk/rss");
+      const politiken = await parser.parseURL("https://politiken.dk/rss");
+      const articles = [...berlingske.items, ...politiken.items].slice(0, 10).map((item, index) => ({
+        id: index + 1,
+        title: item.title,
+        body: item.contentSnippet || item.content || "(Indhold ikke tilgængeligt)",
+      }));
+      return res.end(JSON.stringify(articles));
+    } catch (e) {
+      return res.writeHead(500).end(JSON.stringify({ error: "Kunne ikke hente nyheder" }));
+    }
+  }
 
-app.post("/api/stop-read", (req, res) => {
-  const { userId } = req.body;
-  const session = readingSessions[userId];
-  if (!session) return res.status(400).json({ error: "Ingen aktiv session" });
+  if (url === "/api/start-read" && method === "POST") {
+    const { userId, articleId } = body;
+    readingSessions[userId] = { articleId, startTime: Date.now() };
+    return res.end(JSON.stringify({ ok: true }));
+  }
 
-  const minutes = Math.ceil((Date.now() - session.startTime) / 60000);
-  const user = users.find(u => u.id === userId);
-  if (!user || user.balance < minutes) return res.status(402).json({ error: "Ikke nok minutter tilbage" });
+  if (url === "/api/stop-read" && method === "POST") {
+    const { userId } = body;
+    const session = readingSessions[userId];
+    if (!session) return res.writeHead(400).end(JSON.stringify({ error: "Ingen aktiv session" }));
 
-  const price = (minutes * PRICE_PER_MINUTE_DKK).toFixed(2);
-  user.balance -= minutes;
-  delete readingSessions[userId];
-  res.json({ minutesUsed: minutes, newBalance: user.balance, price: parseFloat(price) });
-});
+    const minutes = Math.ceil((Date.now() - session.startTime) / 60000);
+    const user = users.find(u => u.id === userId);
+    if (!user || user.balance < minutes)
+      return res.writeHead(402).end(JSON.stringify({ error: "Ikke nok minutter tilbage" }));
 
-app.get("/api/balance", (req, res) => {
-  const userId = parseInt(req.query.userId);
-  const user = users.find(u => u.id === userId);
-  if (!user) return res.status(404).json({ error: "Bruger ikke fundet" });
-  res.json({ balance: user.balance, pricePerMinute: PRICE_PER_MINUTE_DKK });
-});
+    const price = (minutes * PRICE_PER_MINUTE_DKK).toFixed(2);
+    user.balance -= minutes;
+    delete readingSessions[userId];
+    return res.end(JSON.stringify({ minutesUsed: minutes, newBalance: user.balance, price: parseFloat(price) }));
+  }
 
-app.post("/api/buy", (req, res) => {
-  const { userId, amount } = req.body;
-  const user = users.find(u => u.id === userId);
-  if (!user) return res.status(404).json({ error: "Bruger ikke fundet" });
+  if (url.startsWith("/api/balance") && method === "GET") {
+    const urlObj = new URL("http://localhost" + url);
+    const userId = parseInt(urlObj.searchParams.get("userId"));
+    const user = users.find(u => u.id === userId);
+    if (!user) return res.writeHead(404).end(JSON.stringify({ error: "Bruger ikke fundet" }));
+    return res.end(JSON.stringify({ balance: user.balance, pricePerMinute: PRICE_PER_MINUTE_DKK }));
+  }
 
-  user.balance += amount;
-  res.json({ success: true, newBalance: user.balance, added: amount });
-});
+  if (url === "/api/buy" && method === "POST") {
+    const { userId, amount } = body;
+    const user = users.find(u => u.id === userId);
+    if (!user) return res.writeHead(404).end(JSON.stringify({ error: "Bruger ikke fundet" }));
+    user.balance += amount;
+    return res.end(JSON.stringify({ success: true, newBalance: user.balance, added: amount }));
+  }
 
-module.exports = app;
+  res.writeHead(404).end(JSON.stringify({ error: "Ikke fundet" }));
+};
